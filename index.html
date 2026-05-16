@@ -789,6 +789,10 @@
       }
 
       .side-panel {
+        order: 1;
+      }
+
+      .scene-panel {
         order: -1;
       }
 
@@ -870,6 +874,9 @@
               <div class="choices" id="choices"></div>
               <div class="action-row" id="continueRow">
                 <button class="primary-btn" id="continueBtn" type="button">继续</button>
+              </div>
+              <div class="action-row" id="backRow" style="display:none;margin-top:8px">
+                <button class="secondary-btn" id="backQuestionBtn" type="button">← 上一题</button>
               </div>
             </div>
           </article>
@@ -1102,7 +1109,7 @@
         text: "Q11 距离下班还有36分钟，老板突然发了新任务并询问今天能不能完成。你会：",
         sub: "电脑风扇响起，像在替你叹气。",
         options: [
-          ["A", "回“可以emoji”并打开豆包。", { perform: 2, survive: 1 }],
+          ["A", "回“👌”并打开豆包。", { perform: 2, survive: 1 }],
           ["B", "先不回，去茶水间接杯水冷静一下。", { escape: 1, survive: 1 }],
           ["C", "打开三个窗口疯狂切换，假装自己很忙。", { perform: 2, chaos: 1 }],
           ["D", "开始思考辞职后去冰岛卖热狗。", { escape: 2, chaos: 1 }]
@@ -2249,6 +2256,7 @@
         document.getElementById("quickAtlasBtn").addEventListener("click", () => this.showAtlas());
         document.getElementById("atlasTopBtn").addEventListener("click", () => this.showAtlas());
         document.getElementById("continueBtn").addEventListener("click", () => this.nextIntro());
+        document.getElementById("backQuestionBtn").addEventListener("click", () => this.goBack());
         document.getElementById("restartBtn").addEventListener("click", () => this.start());
         document.getElementById("showAtlasBtn").addEventListener("click", () => this.showAtlas());
         document.getElementById("backBtn").addEventListener("click", () => this.show(this.state.lastScreen || "home"));
@@ -2286,6 +2294,7 @@
         document.getElementById("dialogueSub").textContent = item.sub;
         document.getElementById("choices").innerHTML = "";
         document.getElementById("continueRow").style.display = "flex";
+        document.getElementById("backRow").style.display = "none";
         document.getElementById("continueBtn").textContent = this.state.introIndex === INTRO.length - 1 ? "开始选择" : "继续";
         this.scene.set(item.scene, type, 0);
       }
@@ -2307,6 +2316,7 @@
         document.getElementById("dialogueText").textContent = q.text;
         document.getElementById("dialogueSub").textContent = q.sub;
         document.getElementById("continueRow").style.display = "none";
+        document.getElementById("backRow").style.display = this.state.qIndex > 0 ? "flex" : "none";
         this.scene.set(q.scene, this.currentGuideType(), this.state.qIndex);
         const choices = document.getElementById("choices");
         choices.innerHTML = "";
@@ -2319,6 +2329,19 @@
           btn.addEventListener("click", () => this.answer(opt));
           choices.appendChild(btn);
         });
+        this.renderProgress();
+      }
+
+      goBack() {
+        if (this.state.qIndex <= 0) return;
+        const prev = this.state.answers.pop();
+        const effect = prev.effect || {};
+        Object.keys(effect).forEach(key => {
+          this.state.scores[key] -= effect[key];
+        });
+        this.state.logs.shift();
+        this.state.qIndex -= 1;
+        this.renderQuestion();
         this.renderProgress();
       }
 
@@ -2336,10 +2359,13 @@
         this.state.answers.push({
           question: this.state.qIndex + 1,
           choice: opt[0],
-          text: opt[1]
+          text: opt[1],
+          effect
         });
-        this.state.logs.unshift(`Q${this.state.qIndex + 1} 选择 ${opt[0]}：精神波动已记录`);
-        this.state.logs = this.state.logs.slice(0, 4);
+        const logEntry = `Q${this.state.qIndex + 1} 选择 ${opt[0]}：精神波动已记录`;
+        const existingIdx = this.state.logs.findIndex(l => l.startsWith(`Q${this.state.qIndex + 1} `));
+        if (existingIdx !== -1) this.state.logs.splice(existingIdx, 1);
+        this.state.logs.unshift(logEntry);
         this.scene.set(q.scene, this.currentGuideType(), this.state.qIndex, opt[0]);
         this.bg.burst(window.innerWidth * (0.35 + Math.random() * 0.35), window.innerHeight * 0.42, "#f3bd2e");
         this.renderProgress();
@@ -2363,7 +2389,7 @@
           status.textContent = "后台维度正在累计，但暂不显示。你只需要继续扮演一个正常上班的人类。";
         }
         const log = document.getElementById("miniLog");
-        log.innerHTML = this.state.logs.map(text => `<div class="log-item">${text}</div>`).join("");
+        log.innerHTML = this.state.logs.slice(0, 4).map(text => `<div class="log-item">${text}</div>`).join("");
       }
 
       finish() {
