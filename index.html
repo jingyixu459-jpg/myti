@@ -789,6 +789,10 @@
       }
 
       .side-panel {
+        order: 1;
+      }
+
+      .scene-panel {
         order: -1;
       }
 
@@ -870,6 +874,7 @@
               <div class="choices" id="choices"></div>
               <div class="action-row" id="continueRow">
                 <button class="primary-btn" id="continueBtn" type="button">继续</button>
+                <button class="secondary-btn" id="backQuestionBtn" type="button" style="display:none">← 上一题</button>
               </div>
             </div>
           </article>
@@ -2249,6 +2254,7 @@
         document.getElementById("quickAtlasBtn").addEventListener("click", () => this.showAtlas());
         document.getElementById("atlasTopBtn").addEventListener("click", () => this.showAtlas());
         document.getElementById("continueBtn").addEventListener("click", () => this.nextIntro());
+        document.getElementById("backQuestionBtn").addEventListener("click", () => this.goBack());
         document.getElementById("restartBtn").addEventListener("click", () => this.start());
         document.getElementById("showAtlasBtn").addEventListener("click", () => this.showAtlas());
         document.getElementById("backBtn").addEventListener("click", () => this.show(this.state.lastScreen || "home"));
@@ -2307,6 +2313,7 @@
         document.getElementById("dialogueText").textContent = q.text;
         document.getElementById("dialogueSub").textContent = q.sub;
         document.getElementById("continueRow").style.display = "none";
+        document.getElementById("backQuestionBtn").style.display = this.state.qIndex > 0 ? "inline-flex" : "none";
         this.scene.set(q.scene, this.currentGuideType(), this.state.qIndex);
         const choices = document.getElementById("choices");
         choices.innerHTML = "";
@@ -2319,6 +2326,19 @@
           btn.addEventListener("click", () => this.answer(opt));
           choices.appendChild(btn);
         });
+        this.renderProgress();
+      }
+
+      goBack() {
+        if (this.state.qIndex <= 0) return;
+        const prev = this.state.answers.pop();
+        const effect = prev.effect || {};
+        Object.keys(effect).forEach(key => {
+          this.state.scores[key] -= effect[key];
+        });
+        this.state.logs.shift();
+        this.state.qIndex -= 1;
+        this.renderQuestion();
         this.renderProgress();
       }
 
@@ -2336,7 +2356,8 @@
         this.state.answers.push({
           question: this.state.qIndex + 1,
           choice: opt[0],
-          text: opt[1]
+          text: opt[1],
+          effect
         });
         this.state.logs.unshift(`Q${this.state.qIndex + 1} 选择 ${opt[0]}：精神波动已记录`);
         this.state.logs = this.state.logs.slice(0, 4);
