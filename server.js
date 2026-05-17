@@ -36,6 +36,47 @@ const DIMENSIONS = [
   { key: "survive", cn: "生存" }
 ];
 
+const COMMENTS_KEY = "__comments";
+const MAX_COMMENTS = 80;
+const DEFAULT_COMMENTS = [
+  {
+    id: "virtual-1",
+    name: "茶水间观察员",
+    text: "测出来是工位影帝，感觉这不是测试，是监控录像。",
+    typeCn: "工位影帝",
+    typeEn: "ACTR",
+    createdAt: "2026-05-17T01:00:00.000Z",
+    virtual: true
+  },
+  {
+    id: "virtual-2",
+    name: "周一受害者",
+    text: "灵魂离职人报道。我的工牌还在，我本人已经在精神世界请假。",
+    typeCn: "灵魂离职人",
+    typeEn: "BYEE",
+    createdAt: "2026-05-17T01:01:00.000Z",
+    virtual: true
+  },
+  {
+    id: "virtual-3",
+    name: "键盘演奏家",
+    text: "已读乱回者很准，我每天都在收到、好的、辛苦了之间随机播放。",
+    typeCn: "已读乱回者",
+    typeEn: "RAND",
+    createdAt: "2026-05-17T01:02:00.000Z",
+    virtual: true
+  },
+  {
+    id: "virtual-4",
+    name: "龟背竹邻居",
+    text: "最角落工位真的有安全感，至少植物不会临时加需求。",
+    typeCn: "长睡眠者",
+    typeEn: "SLPY",
+    createdAt: "2026-05-17T01:03:00.000Z",
+    virtual: true
+  }
+];
+
 function ensureDb() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(DB_FILE)) fs.writeFileSync(DB_FILE, "{}", "utf8");
@@ -61,7 +102,7 @@ function sendJson(res, status, data) {
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": Buffer.byteLength(body),
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
+    "Access-Control-Allow-Methods": "GET,POST,DELETE,OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type"
   });
   res.end(body);
@@ -100,6 +141,14 @@ function makeCode(db) {
 
 function cleanCode(code) {
   return String(code || "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function cleanText(value, maxLength) {
+  return String(value || "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, maxLength);
 }
 
 function saveResult(req, res) {
@@ -160,6 +209,94 @@ function getMatch(req, res, url) {
     return;
   }
   sendJson(res, 200, buildMatch(a, b));
+}
+
+function getStoredComments(db) {
+  return Array.isArray(db[COMMENTS_KEY]) ? db[COMMENTS_KEY] : [];
+}
+
+function sanitizeComment(comment) {
+  return {
+    id: comment.id,
+    name: comment.name,
+    text: comment.text,
+    shareCode: comment.shareCode,
+    mytiCode: comment.mytiCode,
+    typeCn: comment.typeCn,
+    typeEn: comment.typeEn,
+    replyTo: comment.replyTo,
+    createdAt: comment.createdAt,
+    virtual: Boolean(comment.virtual)
+  };
+}
+
+function publicComments(db) {
+  return getStoredComments(db).concat(DEFAULT_COMMENTS).slice(0, 40).map(sanitizeComment);
+}
+
+function getComments(req, res) {
+  const db = readDb();
+  sendJson(res, 200, { comments: publicComments(db) });
+}
+
+function saveComment(req, res) {
+  readBody(req)
+    .then(body => {
+      const text = cleanText(body.text, 120);
+      if (!text) {
+        sendJson(res, 400, { error: "评论内容不能为空" });
+        return;
+      }
+
+      const db = readDb();
+      const mytiCode = /^[HL]{4}$/.test(body.mytiCode) ? body.mytiCode : "";
+      const fallbackType = mytiCode && TYPE_DATA[mytiCode] ? TYPE_DATA[mytiCode] : {};
+      const comments = getStoredComments(db);
+      const replyId = cleanText(body.replyTo, 80);
+      const target = replyId
+        ? comments.concat(DEFAULT_COMMENTS).find(item => item.id === replyId)
+        : null;
+      const comment = {
+        id: `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
+        name: cleanText(body.name, 16) || "匿名工位人",
+        text,
+        ownerKey: cleanText(body.ownerKey, 120),
+        shareCode: cleanCode(body.shareCode).slice(0, 8),
+        mytiCode,
+        typeCn: cleanText(body.typeCn || fallbackType.cn, 18),
+        typeEn: cleanText(body.typeEn || fallbackType.en, 8),
+        replyTo: target ? { id: target.id, name: target.name || "匿名工位人" } : null,
+        createdAt: new Date().toISOString()
+      };
+
+      db[COMMENTS_KEY] = [comment].concat(comments).slice(0, MAX_COMMENTS);
+      writeDb(db);
+      sendJson(res, 200, { comment: sanitizeComment(comment), comments: publicComments(db) });
+    })
+    .catch(error => sendJson(res, 400, { error: error.message || "评论发布失败" }));
+}
+
+function deleteComment(req, res, id) {
+  readBody(req)
+    .then(body => {
+      const db = readDb();
+      const ownerKey = cleanText(body.ownerKey, 120);
+      const comments = getStoredComments(db);
+      const target = comments.find(comment => comment.id === id);
+      if (!target) {
+        sendJson(res, 404, { error: "没有找到这条留言" });
+        return;
+      }
+      if (!ownerKey || ownerKey !== target.ownerKey) {
+        sendJson(res, 403, { error: "只能删除自己发布的留言" });
+        return;
+      }
+
+      db[COMMENTS_KEY] = comments.filter(comment => comment.id !== id);
+      writeDb(db);
+      sendJson(res, 200, { ok: true, comments: publicComments(db) });
+    })
+    .catch(error => sendJson(res, 400, { error: error.message || "删除失败" }));
 }
 
 function buildMatch(a, b) {
@@ -292,6 +429,18 @@ const server = http.createServer((req, res) => {
   }
   if (req.method === "POST" && url.pathname === "/api/results") {
     saveResult(req, res);
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/api/comments") {
+    getComments(req, res);
+    return;
+  }
+  if (req.method === "POST" && url.pathname === "/api/comments") {
+    saveComment(req, res);
+    return;
+  }
+  if (req.method === "DELETE" && url.pathname.startsWith("/api/comments/")) {
+    deleteComment(req, res, decodeURIComponent(url.pathname.split("/").pop()));
     return;
   }
   if (req.method === "GET" && url.pathname.startsWith("/api/results/")) {
